@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2011-2012 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2011-2013 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -40,8 +40,8 @@ Module.runModule = function (source, filename, activityOrService) {
 		id = ".";
 	}
 
-	var module;
-	var isService = (activityOrService instanceof Titanium.Service);
+	var module,
+		isService = (activityOrService instanceof Titanium.Service);
 
 	if (isService) {
 		module = new Module(id, null, {
@@ -152,51 +152,38 @@ Module.prototype.loadExternalModule = function(id, externalBinding, context) {
 	var externalModule;
 	var returnObj;
 
-	if (kroll.runtime === "rhino") {
-		// TODO -- add support for context specific invokers in Rhino
-		var bindingKey = Object.keys(externalBinding)[0];
-		if (bindingKey) {
-			externalModule = externalBinding[bindingKey];
-		}
+	externalModule = Module.cache[id];
 
-		extendModuleWithCommonJs(externalModule, id, this, context);
+	if (!externalModule) {
+		// Get the compiled bootstrap JS
+		var source = externalBinding.bootstrap;
 
-		return externalModule;
+		// Load the native module's bootstrap JS
+		var module = new Module(id, this, context);
+		module.load(id + "/bootstrap.js", source);
 
-	} else {
-		externalModule = Module.cache[id];
+		// Bootstrap and load the module using the native bindings
+		var result = module.exports.bootstrap(externalBinding);
 
-		if (!externalModule) {
-			// Get the compiled bootstrap JS
-			var source = externalBinding.bootstrap;
+		// Cache the external module instance
+		externalModule = Module.cache[id] = result;
+	}
 
-			// Load the native module's bootstrap JS
-			var module = new Module(id, this, context);
-			module.load(id + "/bootstrap.js", source);
-
-			// Bootstrap and load the module using the native bindings
-			var result = module.exports.bootstrap(externalBinding);
-
-			// Cache the external module instance
-			externalModule = Module.cache[id] = result;
-		}
-
-		if (externalModule) {
-			// We cache each context-specific module wrapper
-			// on the parent module, rather than in the Module.cache
-			var wrapper = this.wrapperCache[id];
-			if (wrapper) {
-				return wrapper;
-			}
-	
-			wrapper = this.createModuleWrapper(externalModule, sourceUrl);
-
-			extendModuleWithCommonJs(wrapper, id, this, context);
-
-			this.wrapperCache[id] = wrapper;
-	
+	if (externalModule) {
+		// We cache each context-specific module wrapper
+		// on the parent module, rather than in the Module.cache
+		var wrapper = this.wrapperCache[id];
+		if (wrapper) {
 			return wrapper;
 		}
+
+		wrapper = this.createModuleWrapper(externalModule, sourceUrl);
+
+		extendModuleWithCommonJs(wrapper, id, this, context);
+
+		this.wrapperCache[id] = wrapper;
+
+		return wrapper;
 	}
 
 	kroll.log(TAG, "Unable to load external module: " + id);
@@ -316,8 +303,8 @@ Module.prototype.require = function (request, context, useCache) {
 // Setup a sandbox and run the module's script inside it.
 // Returns the result of the executed script.
 Module.prototype._runScript = function (source, filename) {
-	var self = this;
-	var url = "app://" + filename;
+	var self = this,
+		url = "app://" + filename;
 
 	function require(path, context) {
 		return self.require(path, context);
@@ -339,40 +326,16 @@ Module.prototype._runScript = function (source, filename) {
 	context.sourceUrl = url;
 	context.module = this;
 
-	// Create a "context global" that's specific to each module
-	var contextGlobal = context.global = {
-		exports: this.exports,
-		require: require,
-		module: this,
-		__filename: filename,
-		__dirname: path.dirname(filename),
-		kroll: kroll
-	};
-	contextGlobal.global = contextGlobal;
-
-	// Add support for console logging
-	contextGlobal.console = NativeModule.require('console');
-
 	var ti = new Titanium.Wrapper(context);
-	contextGlobal.Ti = contextGlobal.Titanium = ti;
 
-	// We initialize the context with the standard Javascript APIs and globals first before running the script
-	var newContext = context.global = ti.global = Script.createContext(contextGlobal);
-	bootstrap.bootstrapGlobals(newContext, Titanium);
+	// In V8, we treat external modules the same as native modules.  First, we wrap the
+	// module code and then run it in the current context.  This will allow external modules to
+	// access globals as mentioned in TIMOB-11752. This will also help resolve startup slowness that
+	// occurs as a result of creating a new context during startup in TIMOB-12286.
+	source = Module.wrap(source);
 
-	if (kroll.runtime == "rhino") {
-		// The Rhino version of this API takes a custom global object but uses the same Rhino "Context".
-		// It's not possible to create more than 1 Context per thread in Rhino, so contextGlobal
-		// is essentially a detached global object that mimics a new context.
-		return runInThisContext(source, filename, true, newContext);
-
-	} else {
-		// The V8 version of this API creates a brand new V8 top-level context that's associated
-		// with a new global object. Script.createContext copies all of our context-specific data
-		// into a new ContextWrapper that doubles as the global object for the context itself.
-		kroll.moduleContexts.push(newContext);
-		return Script.runInContext(source, newContext, filename, true);
-	}
+	var f = Script.runInThisContext(source, filename, true);
+	return f(this.exports, require, this, filename, path.dirname(filename), ti, ti, global, kroll);
 }
 
 // Determine the paths where the requested module could live.

@@ -291,7 +291,7 @@ DEFINE_EXCEPTIONS
 	NSURL *url = [TiUtils toURL:image proxy:proxy];
 	if (url==nil)
 	{
-		NSLog(@"[WARN] could not find image: %@",[url absoluteString]);
+		NSLog(@"[WARN] could not find image: %@",image);
 		return nil;
 	}
 	return [[ImageLoader sharedLoader] loadImmediateStretchableImage:url withLeftCap:leftCap topCap:topCap];
@@ -483,6 +483,11 @@ DEFINE_EXCEPTIONS
 	return [self layer];
 }
 
+-(CALayer *)gradientLayer
+{
+    return gradientLayer;
+}
+
 // You might wonder why we don't just use the native feature of -[UIColor colorWithPatternImage:].
 // Here's why:
 // * It doesn't properly handle alpha channels
@@ -494,9 +499,9 @@ DEFINE_EXCEPTIONS
 -(void)renderRepeatedBackground:(id)image
 {
     if (![NSThread isMainThread]) {
-        dispatch_async(dispatch_get_main_queue(), ^{
+        TiThreadPerformOnMainThread(^{
             [self renderRepeatedBackground:image];
-        });
+        }, NO);
         return;
     }
     
@@ -551,6 +556,8 @@ DEFINE_EXCEPTIONS
         if (bgImage != nil) {
             [self backgroundImageLayer].contentsScale = [bgImage scale];
             [self backgroundImageLayer].contentsCenter = TiDimensionLayerContentCenter(topCap, leftCap, topCap, leftCap, [bgImage size]);
+            [self backgroundImageLayer].magnificationFilter = @"nearest";
+            [self backgroundImageLayer].minificationFilter = @"nearest";
         }
     }
     

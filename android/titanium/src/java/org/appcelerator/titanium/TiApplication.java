@@ -38,6 +38,7 @@ import org.appcelerator.titanium.analytics.TiAnalyticsEventFactory;
 import org.appcelerator.titanium.analytics.TiAnalyticsModel;
 import org.appcelerator.titanium.analytics.TiAnalyticsService;
 import org.appcelerator.titanium.util.TiFileHelper;
+import org.appcelerator.titanium.util.TiImageLruCache;
 import org.appcelerator.titanium.util.TiPlatformHelper;
 import org.appcelerator.titanium.util.TiResponseCache;
 import org.appcelerator.titanium.util.TiUIHelper;
@@ -50,6 +51,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
@@ -82,6 +84,7 @@ public abstract class TiApplication extends Application implements Handler.Callb
 	public static final int DEFAULT_THREAD_STACK_SIZE = 16 * 1024; // 16K as a "sane" default
 	public static final String APPLICATION_PREFERENCES_NAME = "titanium";
 	public static final String PROPERTY_FASTDEV = "ti.android.fastdev";
+	public static final int TRIM_MEMORY_RUNNING_LOW = 10; // Application.TRIM_MEMORY_RUNNING_LOW for API 16+
 
 	private boolean restartPending = false;
 	private String baseUrl;
@@ -198,11 +201,15 @@ public abstract class TiApplication extends Application implements Handler.Callb
 		Activity currentActivity;
 
 		for (int i = activityStack.size() - 1; i >= 0; i--) {
-			activityRef = activityStack.get(i);
-			if (activityRef != null) {
-				currentActivity = activityRef.get();
-				if (currentActivity != null && !currentActivity.isFinishing()) {
-					currentActivity.finish();
+			// We need to check the stack size here again. Since we call finish(), that could potentially
+			// change the activity stack while we are looping through them. TIMOB-12487
+			if (i < activityStack.size()) {
+				activityRef = activityStack.get(i);
+				if (activityRef != null) {
+					currentActivity = activityRef.get();
+					if (currentActivity != null && !currentActivity.isFinishing()) {
+						currentActivity.finish();
+					}
 				}
 			}
 		}
@@ -364,6 +371,24 @@ public abstract class TiApplication extends Application implements Handler.Callb
 		stopExternalStorageMonitor();
 		accessibilityManager = null;
 		super.onTerminate();
+	}
+
+	@Override
+	public void onLowMemory ()
+	{
+		// Release all the cached images
+		TiImageLruCache.getInstance().evictAll();
+		super.onLowMemory();
+	}
+
+	@Override
+	public void onTrimMemory(int level)
+	{
+		if (Build.VERSION.SDK_INT >= TiC.API_LEVEL_HONEYCOMB && level >= TRIM_MEMORY_RUNNING_LOW) {
+			// Release all the cached images
+			TiImageLruCache.getInstance().evictAll();
+		}
+		super.onTrimMemory(level);
 	}
 
 	public void postAppInfo()
@@ -565,7 +590,7 @@ public abstract class TiApplication extends Application implements Handler.Callb
 		if (stylesheet != null) {
 			return stylesheet.getStylesheet(objectId, classes, density, basename);
 		}
-		return new KrollDict();
+		return null;
 	}
 
 	public void registerProxy(KrollProxy proxy)
@@ -876,7 +901,7 @@ public abstract class TiApplication extends Application implements Handler.Callb
 			TiApplication.activityTransitionListeners.clear();
 		}
 		if (TiApplication.activityStack != null) {
-			TiApplication.activityTransitionListeners.clear();
+			TiApplication.activityStack.clear();
 		}
 	}
 

@@ -45,7 +45,7 @@ public abstract class KrollRuntime implements Handler.Callback
 
 	private static KrollRuntime instance;
 	private static int activityRefCount = 0;
-	private static int serviceRefCount = 0;
+	private static int serviceReceiverRefCount = 0;
 
 	private WeakReference<KrollApplication> krollApplication;
 	private KrollRuntimeThread thread;
@@ -171,7 +171,7 @@ public abstract class KrollRuntime implements Handler.Callback
 
 	protected void doInit()
 	{
-		// initializer for the specific runtime implementation (V8, Rhino, etc)
+		// initializer for the specific runtime implementation (V8)
 		initRuntime();
 
 		// Notify the main thread that the runtime has been initialized
@@ -338,7 +338,7 @@ public abstract class KrollRuntime implements Handler.Callback
 	public static void incrementActivityRefCount()
 	{
 		activityRefCount++;
-		if ((activityRefCount + serviceRefCount) == 1 && instance != null) {
+		if ((activityRefCount + serviceReceiverRefCount) == 1 && instance != null) {
 			syncInit();
 		}
 	}
@@ -346,7 +346,7 @@ public abstract class KrollRuntime implements Handler.Callback
 	public static void decrementActivityRefCount()
 	{
 		activityRefCount--;
-		if ((activityRefCount + serviceRefCount) > 0 || instance == null) {
+		if ((activityRefCount + serviceReceiverRefCount) > 0 || instance == null) {
 			return;
 		}
 
@@ -359,27 +359,27 @@ public abstract class KrollRuntime implements Handler.Callback
 	}
 
 	// Similar to {@link #incrementActivityRefCount} but for a Titanium Service.
-	public static void incrementServiceRefCount()
+	public static void incrementServiceReceiverRefCount()
 	{
-		serviceRefCount++;
-		if ((activityRefCount + serviceRefCount) == 1 && instance != null) {
+		serviceReceiverRefCount++;
+		if ((activityRefCount + serviceReceiverRefCount) == 1 && instance != null) {
 			syncInit();
 		}
 	}
 
-	public static void decrementServiceRefCount()
+	public static void decrementServiceReceiverRefCount()
 	{
-		serviceRefCount--;
-		if ((activityRefCount + serviceRefCount) > 0 || instance == null) {
+		serviceReceiverRefCount--;
+		if ((activityRefCount + serviceReceiverRefCount) > 0 || instance == null) {
 			return;
 		}
 
 		instance.dispose();
 	}
 
-	public static int getServiceRefCount()
+	public static int getServiceReceiverRefCount()
 	{
-		return serviceRefCount;
+		return serviceReceiverRefCount;
 	}
 
 	private void internalDispose()
@@ -415,7 +415,7 @@ public abstract class KrollRuntime implements Handler.Callback
 
 	public void setGCFlag()
 	{
-		// No-op in Rhino, V8 should override.
+		// No-op V8 should override.
 	}
 
 	public State getRuntimeState()

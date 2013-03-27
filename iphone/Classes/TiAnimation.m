@@ -125,6 +125,14 @@ self.p = v;\
 	return self;
 }
 
+-(void)setCallBack:(KrollCallback*)callback_ context:(id<TiEvaluator>)context_
+{
+    RELEASE_TO_NIL(callback);
+    if (context_ != nil) {
+        callback = [[ListenerEntry alloc] initWithListener:callback_ context:context_ proxy:self];
+    }
+}
+
 -(void)dealloc
 {
 	RELEASE_TO_NIL(zIndex);
@@ -169,6 +177,11 @@ self.p = v;\
 		arg = [args objectAtIndex:0];
 		if ([arg isKindOfClass:[TiAnimation class]])
 		{
+            if ([args count] > 1) {
+                KrollCallback *cb = [args objectAtIndex:1];
+                ENSURE_TYPE(cb, KrollCallback);
+                [(TiAnimation*)arg setCallBack:cb context:context];
+            }
 			return (TiAnimation*)arg;
 		}
 	}
@@ -322,6 +335,17 @@ self.p = v;\
     return animationDuration;
 }
 
+-(CAMediaTimingFunction*) timingFunction
+{
+    switch ([curve intValue]) {
+        case UIViewAnimationOptionCurveEaseInOut: return [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+        case UIViewAnimationOptionCurveEaseIn: return [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseIn];
+        case UIViewAnimationOptionCurveEaseOut: return [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+        case UIViewAnimationOptionCurveLinear: return [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionLinear];
+        default: return [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionDefault];
+    }
+}
+
 -(void)animate:(id)args
 {
 	ENSURE_UI_THREAD(animate,args);
@@ -383,16 +407,6 @@ self.p = v;\
 		LayoutConstraint *contraints = [ourProxy layoutProperties];
 		ApplyConstraintToViewWithBounds(contraints, view_, transitionView.bounds);
 		[ourProxy layoutChildren:NO];
-	}
-	else
-	{
-		CALayer * modelLayer = [view_ layer];
-		CALayer * transitionLayer = [modelLayer presentationLayer];
-		NSArray * animationKeys = [transitionLayer animationKeys];
-		for (NSString * thisKey in animationKeys)
-		{
-			[modelLayer setValue:[transitionLayer valueForKey:thisKey] forKey:thisKey];
-		}
 	}
 
 	animatedView = [theview retain];
@@ -503,7 +517,37 @@ doReposition = YES;\
                 
                 if (doReposition)
                 {
+                    CABasicAnimation *boundsAnimation = nil;
+                    CABasicAnimation *positionAnimation = nil;
+                    bool hasGradient = ([uiview gradientLayer] != nil);
+                    if (hasGradient) {
+                        boundsAnimation = [CABasicAnimation animationWithKeyPath:@"bounds"];
+                        boundsAnimation.fromValue = [NSValue valueWithCGRect:[uiview bounds]];
+                        boundsAnimation.duration = animationDuration;
+                        boundsAnimation.timingFunction = [self timingFunction];
+                    
+                        positionAnimation = [CABasicAnimation animationWithKeyPath:@"position"];
+                        positionAnimation.fromValue = [NSValue valueWithCGPoint:CGPointMake([uiview bounds].size.width / 2, [uiview bounds].size.height / 2)];
+                        positionAnimation.duration = animationDuration;
+                        positionAnimation.timingFunction = [self timingFunction];
+                    }
+                    
                     [(TiViewProxy *)[uiview proxy] reposition];
+                    
+                    if (hasGradient) {
+                        boundsAnimation.toValue = [NSValue valueWithCGRect:[uiview bounds]];
+                        positionAnimation.toValue = [NSValue valueWithCGPoint:CGPointMake([uiview bounds].size.width / 2, [uiview bounds].size.height / 2)];
+                        if (repeatCount > 0) {
+                            boundsAnimation.autoreverses = (reverseAnimation != nil);
+                            boundsAnimation.repeatCount = repeatCount;
+                            
+                            positionAnimation.autoreverses = (reverseAnimation != nil);
+                            positionAnimation.repeatCount = repeatCount;
+                        }
+                    
+                        [[uiview gradientLayer] addAnimation:boundsAnimation forKey:@"animateBounds"];
+                        [[uiview gradientLayer] addAnimation:positionAnimation forKey:@"animatePosition"];
+                    }
                 }
             }
             

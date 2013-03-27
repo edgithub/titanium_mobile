@@ -61,17 +61,46 @@ exports.config = function (logger, config, cli) {
 						if (!id) {
 							throw new appc.exception(__('Invalid app id'));
 						}
-						if (!/^([a-z_]{1}[a-z0-9_]*(\.[a-z_]{1}[a-z0-9_]*)*)$/.test(id)) {
+						
+						// general app id validation
+						if (!/^([a-zA-Z_]{1}[a-zA-Z0-9_-]*(\.[a-zA-Z0-9_-]*)*)$/.test(id)) {
 							throw new appc.exception(__('Invalid app id "%s"', id), [
-								__('The app id must consist of letters, numbers, and underscores.'),
+								__('The app id must consist of letters, numbers, dashes, and underscores.'),
+								__('Note: Android does not allow dashes and iOS does not allow underscores.'),
 								__('The first character must be a letter or underscore.'),
 								__("Usually the app id is your company's reversed Internet domain name. (i.e. com.example.myapp)")
 							]);
 						}
-						if (!ti.validAppId(id)) {
-							throw new appc.exception(__('Invalid app id "%s"', id), [
-								__('The app id parts must not contain reserved words.')
-							]);
+						
+						if (cli.argv.platforms) {
+							var scrubbed = ti.scrubPlatforms(cli.argv.platforms).scrubbed;
+							if (scrubbed.indexOf('android') != -1) {
+								if (id.indexOf('-') != -1) {
+									throw new appc.exception(__('Invalid app id "%s"', id), [
+										__('For apps targeting %s, the app id must not contain dashes.', 'Android'.cyan)
+									]);
+								}
+								
+								if (!/^([a-zA-Z_]{1}[a-zA-Z0-9_]*(\.[a-zA-Z_]{1}[a-zA-Z0-9_]*)*)$/.test(id)) {
+									throw new appc.exception(__('Invalid app id "%s"', id), [
+										__('For apps targeting %s, numbers are not allowed directly after periods.', 'Android'.cyan)
+									]);
+								}
+								
+								if (!ti.validAppId(id)) {
+									throw new appc.exception(__('Invalid app id "%s"', id), [
+										__('For apps targeting %s, the app id must not contain Java reserved words.', 'Android'.cyan)
+									]);
+								}
+							}
+							
+							if (scrubbed.indexOf('ios') != -1 || scrubbed.indexOf('iphone') != -1) {
+								if (id.indexOf('_') != -1) {
+									throw new appc.exception(__('Invalid app id "%s"', id), [
+										__('For apps targeting %s, the app id must not contain underscores.', 'iOS'.cyan)
+									]);
+								}
+							}
 						}
 						return true;
 					}
@@ -88,7 +117,6 @@ exports.config = function (logger, config, cli) {
 				prompt: {
 					label: __('Project name'),
 					error: __('Invalid project name')
-					// pattern: /^[A-Za-z]+[A-Za-z0-9_-]*$/
 				},
 				required: true
 			},
@@ -123,12 +151,11 @@ exports.config = function (logger, config, cli) {
 
 exports.validate = function (logger, config, cli) {
 	var platforms = ti.scrubPlatforms(cli.argv.platforms);
-	cli.argv.platforms = platforms.scrubbed;
 	
 	if (platforms.bad.length) {
 		logger.error(__n('Invalid platform: %%s', 'Invalid platforms: %%s', platforms.bad.length, platforms.bad.join(', ')) + '\n');
 		logger.log(__('Available platforms for SDK version %s:', ti.manifest.sdkVersion) + '\n');
-		ti.availablePlatforms.forEach(function (p) {
+		ti.availablePlatformsNames.forEach(function (p) {
 			logger.log('    ' + p.cyan);
 		});
 		logger.log();
@@ -136,22 +163,80 @@ exports.validate = function (logger, config, cli) {
 	}
 	
 	cli.argv.id = (cli.argv.id || '').trim();
-	if (!/^([a-z_]{1}[a-z0-9_]*(\.[a-z_]{1}[a-z0-9_]*)*)$/.test(cli.argv.id)) {
+	
+	// general app id validation (we'll make sure there are no dashes for Android and no underscores for iOS later)
+	if (!/^([a-zA-Z_]{1}[a-zA-Z0-9_-]*(\.[a-zA-Z0-9_-]*)*)$/.test(cli.argv.id)) {
 		logger.error(__('Invalid app id "%s"', cli.argv.id) + '\n');
-		logger.log(__('The app id must consist of letters, numbers, and underscores.'));
+		logger.log(__('The app id must consist of letters, numbers, dashes, and underscores.'));
+		logger.log(__('Note: Android does not allow dashes and iOS does not allow underscores.'));
 		logger.log(__('The first character must be a letter or underscore.'));
 		logger.log(__("Usually the app id is your company's reversed Internet domain name. (i.e. com.example.myapp)") + '\n');
 		process.exit(1);
 	}
 	
-	if (!ti.validAppId(cli.argv.id)) {
-		logger.error(__('Invalid app id "%s"', cli.argv.id) + '\n');
-		logger.log(__('The app id parts must not contain reserved words.') + '\n');
-		process.exit(1);
+	if (platforms.scrubbed.indexOf('android') != -1) {
+		// if android is in the list of platforms, we go down the lowest common denominator road
+		if (cli.argv.id.indexOf('-') != -1) {
+			logger.error(__('Invalid app id "%s"', cli.argv.id) + '\n');
+			logger.log(__('For apps targeting %s, the app id must not contain dashes.', 'Android'.cyan) + '\n');
+			process.exit(1);
+		}
+		
+		if (!/^([a-zA-Z_]{1}[a-zA-Z0-9_]*(\.[a-zA-Z_]{1}[a-zA-Z0-9_]*)*)$/.test(cli.argv.id)) {
+			logger.error(__('Invalid app id "%s"', cli.argv.id) + '\n');
+			logger.log(__('For apps targeting %s, numbers are not allowed directly after periods.', 'Android'.cyan) + '\n');
+			process.exit(1);
+		}
+		
+		if (!ti.validAppId(cli.argv.id)) {
+			logger.error(__('Invalid app id "%s"', cli.argv.id) + '\n');
+			logger.log(__('For apps targeting %s, the app id must not contain Java reserved words.', 'Android'.cyan) + '\n');
+			process.exit(1);
+		}
+	} else {
+		// android is not in the list of platforms
+		var counter = 0;
+		
+		if (cli.argv.id.indexOf('-') != -1) {
+			logger.warn(__('The specified app id is not compatible with the Android platform.'));
+			logger.warn(__('Android does not allow dashes in the app id.'));
+			counter++;
+		}
+		
+		if (!/^([a-zA-Z_]{1}[a-zA-Z0-9_]*(\.[a-zA-Z_]{1}[a-zA-Z0-9_]*)*)$/.test(cli.argv.id)) {
+			counter || logger.warn(__('The specified app id is not compatible with the Android platform.'));
+			logger.warn(__('Android does not allow numbers directly following periods in the app id.'));
+			counter++;
+		}
+		
+		if (!ti.validAppId(cli.argv.id)) {
+			counter || logger.warn(__('The specified app id is not compatible with the Android platform.'));
+			logger.warn(__('Android does not allow Java reserved words in the app id.'));
+			counter++;
+		}
+		
+		if (counter) {
+			logger.warn(__('If you wish to add Android support, you will need to fix the <id> in the tiapp.xml.'));
+			logger.log();
+		}
+	}
+	
+	// next we check if iOS contains any underscores
+	if (cli.argv.id.indexOf('_') != -1) {
+		if (platforms.scrubbed.indexOf('ios') != -1 || platforms.scrubbed.indexOf('iphone') != -1) {
+			logger.error(__('Invalid app id "%s"', cli.argv.id) + '\n');
+			logger.log(__('For apps targeting %s, the app id must not contain underscores.', 'iOS'.cyan) + '\n');
+			process.exit(1);
+		} else {
+			logger.warn(__('The specified app id is not compatible with the iOS platform.'));
+			logger.warn(__('iOS does not allow underscores in the app id.'));
+			logger.warn(__('If you wish to add iOS support, you will need to fix the <id> in the tiapp.xml.'));
+			logger.log();
+		}
 	}
 	
 	cli.argv.name = (cli.argv.name || '').trim();
-	if (!cli.argv.name) { // !/^[A-Za-z]+[A-Za-z0-9_-]*$/.test(cli.argv.name)) {
+	if (!cli.argv.name) {
 		logger.error(__('Invalid project name "%s"', cli.argv.name) + '\n');
 		logger.log(__('The project name must consist of letters, numbers, dashes, and underscores.'));
 		logger.log(__('The first character must be a letter.') + '\n');
@@ -170,7 +255,7 @@ exports.validate = function (logger, config, cli) {
 
 exports.run = function (logger, config, cli) {
 	var projectName = cli.argv.name,
-		platforms = cli.argv.platforms,
+		platforms = ti.scrubPlatforms(cli.argv.platforms),
 		id = cli.argv.id,
 		type = cli.argv.type,
 		url = cli.argv.url || '',
@@ -182,10 +267,11 @@ exports.run = function (logger, config, cli) {
 		analyticsPayload;
 	
 	afs.exists(projectDir) || wrench.mkdirSyncRecursive(projectDir);
-	wrench.copyDirSyncRecursive(templateDir, projectDir);
 	
 	if (type == 'app') {
 		logger.info(__('Creating Titanium Mobile application project'));
+		
+		afs.copyDirSyncRecursive(templateDir, projectDir, { logger: logger.debug });
 		
 		// read and populate the tiapp.xml
 		projectConfig = new ti.tiappxml(projectDir + '/tiapp.xml');
@@ -195,13 +281,13 @@ exports.run = function (logger, config, cli) {
 		projectConfig.version = '1.0';
 		projectConfig.guid = uuid.v4();
 		projectConfig['deployment-targets'] = {};
-		if (platforms.indexOf('ios') != -1) {
-			platforms.indexOf('ipad') != -1 || platforms.push('ipad');
-			platforms.indexOf('iphone') != -1 || platforms.push('iphone');
+		if (platforms.original.indexOf('ios') != -1) {
+			platforms.original.indexOf('ipad') != -1 || platforms.original.push('ipad');
+			platforms.original.indexOf('iphone') != -1 || platforms.original.push('iphone');
 		}
 		ti.availablePlatformsNames.forEach(function (p) {
 			if (p != 'ios') {
-				projectConfig['deployment-targets'][p] = platforms.indexOf(p) != -1;
+				projectConfig['deployment-targets'][p] = platforms.original.indexOf(p) != -1;
 			}
 		});
 		projectConfig['sdk-version'] = sdk.name;
@@ -240,6 +326,8 @@ exports.run = function (logger, config, cli) {
 	} else if (type == 'module') {
 		logger.info(__('Creating Titanium Mobile module project'));
 		
+		afs.copyDirSyncRecursive(templateDir, projectDir, { logger: logger.debug });
+		
 		projectConfig = {
 			'___PROJECTNAMEASIDENTIFIER___': projectName.toLowerCase().split(/\./).map(function (s) { return appc.string.capitalize(s); }).join(''),
 			'___MODULE_NAME_CAMEL___': projectName.toLowerCase().split(/[\W_]/).map(function (s) { return appc.string.capitalize(s); }).join(''),
@@ -271,7 +359,7 @@ exports.run = function (logger, config, cli) {
 			'name: ' + projectName,
 			'moduleid: ' + id,
 			'guid: ' + projectConfig.__GUID__,
-			'platforms: ' + platforms.sort().join(', ')
+			'platforms: ' + platforms.original.join(', ')
 		].join('\n'));
 
 		analyticsPayload = {
@@ -284,16 +372,17 @@ exports.run = function (logger, config, cli) {
 			version: '1.0',
 			copyright: 'copyright: Copyright (c) 2012 by ' + ((config.user && config.user.name) || 'Your Company'),
 			minsdk: sdk.name,
-			platforms: platforms.sort().join(', '),
+			platforms: platforms.original.join(', '),
 			date: (new Date()).toDateString()
 		};
 		
 		cli.addAnalyticsEvent('project.create.module', analyticsPayload);
 	}
 	
-	platforms.forEach(function (platform) {
+	platforms.scrubbed.forEach(function (platform) {
 		var p = afs.resolvePath(path.dirname(module.filename), '..', '..', platform, 'cli', 'commands', '_create.js');
 		if (afs.exists(p)) {
+			logger.info(__('Copying "%s" platform resources', platform));
 			require(p).run(logger, config, cli, projectConfig);
 		}
 	});

@@ -343,9 +343,9 @@ NSArray* moviePlayerKeys = nil;
 -(void)setMediaControlStyle:(NSNumber *)value
 {
 	if (movie != nil) {
-		dispatch_async(dispatch_get_main_queue(), ^{
+		TiThreadPerformOnMainThread(^{
 			[movie setControlStyle:[TiUtils intValue:value def:MPMovieControlStyleDefault]];
-		});
+		}, NO);
 	} else {
 		[loadProperties setValue:value forKey:@"mediaControlStyle"];
 	}
@@ -870,16 +870,10 @@ NSArray* moviePlayerKeys = nil;
 	if (thumbnailCallback!=nil)
 	{
 		NSDictionary *userinfo = [note userInfo];
-		NSMutableDictionary *event = [NSMutableDictionary dictionary];
 		NSError* value = [userinfo objectForKey:MPMoviePlayerThumbnailErrorKey];
-		if (value!=nil)
+		NSMutableDictionary *event = [TiUtils dictionaryWithCode:[value code] message:[TiUtils messageFromError:value]];
+		if (value==nil)
 		{
-			[event setObject:NUMBOOL(NO) forKey:@"success"];
-			[event setObject:[value description] forKey:@"error"];
-		}
-		else 
-		{
-			[event setObject:NUMBOOL(YES) forKey:@"success"];
 			UIImage *image = [userinfo valueForKey:MPMoviePlayerThumbnailImageKey];
 			TiBlob *blob = [[[TiBlob alloc] initWithImage:image] autorelease];
 			[event setObject:blob forKey:@"image"];
